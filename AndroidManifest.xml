@@ -14,7 +14,7 @@
         <activity
             android:name=".MainActivity"
             android:label="@string/title_activity_main"
-            android:launchMode="singleInstance"            
+            android:launchMode="standard"            
         	android:taskAffinity=""
         	android:theme="@android:style/Theme.Holo.Dialog.NoActionBar">
             <intent-filter>
@@ -31,6 +31,18 @@
                 <data android:mimeType="audio/*" />
             </intent-filter>
         </activity>
+        
+        <!-- This is necessary for file browser -->
+        <activity
+            android:name="ua.com.vassiliev.androidfilebrowser.FileBrowserActivity"
+            android:label="File browser" 
+            android:configChanges="orientation|keyboardHidden">
+            <intent-filter>
+                <action android:name="ua.com.vassiliev.androidfilebrowser.SELECT_DIRECTORY_ACTION"></action>
+            </intent-filter>
+            
+        </activity>
+        <!-- End of file browser necessity -->
     </application>
 
 </manifest>

@@ -48,8 +48,22 @@
 	        android:id="@+id/play_button"
 	        android:layout_width="wrap_content"
 	        android:layout_height="wrap_content"
-	        android:onClick="playAudio"
+	        android:onClick="playClick"
 	        android:text="@string/play_button" />
+	    
+	    <Button
+	        android:id="@+id/load_button"
+	        android:layout_width="wrap_content"
+	        android:layout_height="wrap_content"
+	        android:onClick="showFileSelection"
+	        android:text="@string/load_button" />
+	    
+	    <Button
+	        android:id="@+id/done_button"
+	        android:layout_width="wrap_content"
+	        android:layout_height="wrap_content"
+	        android:onClick="exitApplication"
+	        android:text="@string/done_button" />
 
     </LinearLayout>
 

@@ -1,14 +1,29 @@
+/*
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package com.chromastone.soundplayer;
 
+import java.io.File;
 import java.io.IOException;
 
 import android.app.Activity;
-import android.app.Dialog;
 import android.content.Intent;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.util.Log;
 import android.view.Menu;
@@ -16,17 +31,26 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.SeekBar;
 import android.widget.TextView;
+import android.widget.Toast;
 
 public class MainActivity extends Activity 
 	implements 
-	MediaPlayer.OnPreparedListener, 
 	MediaPlayer.OnErrorListener, 
 	MediaPlayer.OnCompletionListener,
-	MediaPlayer.OnInfoListener,
-	AudioManager.OnAudioFocusChangeListener
+	MediaPlayer.OnInfoListener
 {
+	private enum PlayerState
+	{
+		Stopped,
+		Playing,
+		Paused
+	}
+	
+	private static final int REQUEST_CODE_PICK_FILE = 1;
 	
 	private Uri _currentUri;
+	private boolean _autoPlay;
+	private PlayerState _state = PlayerState.Stopped;
 	private MediaPlayer _mediaPlayer;
 	private Handler _handler = new Handler();
 	
@@ -60,12 +84,6 @@ public class MainActivity extends Activity
 		setFilename(error);
 	}
 	
-	private void togglePlayButton() {
-        Button playButton = (Button) findViewById(R.id.play_button);
-		
-        playButton.setEnabled(!playButton.isEnabled());
-	}
-	
 	private int getProgressPercentage(long currentDuration, long totalDuration){
         Double percentage = (double) 0;
  
@@ -79,32 +97,50 @@ public class MainActivity extends Activity
         return percentage.intValue();
     }
 	
+	private void updateProgressUI() {
+		long totalDuration = _mediaPlayer.getDuration();
+        long currentPosition = _mediaPlayer.getCurrentPosition();
+        
+        // HACK: for some reason current position can go backwards at the end on some files
+        if (currentPosition < _previousPostion && currentPosition > 0)
+        	return;
+        
+        int progress = getProgressPercentage(currentPosition, totalDuration);
+        
+        _playbackSeekBar.setProgress(progress);
+        Log.d(getLocalClassName(), "Progress: " + progress + " (" + currentPosition + "/" + totalDuration + ")");
+        
+        _previousPostion = currentPosition;
+	}
+	
 	private void updateProgress() {
 		_handler.postDelayed(_updateProgressTask, 100);
+	}
+	
+	private void updateProgressNow() {
+		updateProgressUI();
 	}
 	
 	private long _previousPostion = 0;
 	
 	private Runnable _updateProgressTask = new Runnable() {
 		public void run() {
-			long totalDuration = _mediaPlayer.getDuration();
-            long currentPosition = _mediaPlayer.getCurrentPosition();
-            
-            // HACK: for some reason current position can go backwards at the end on some files
-            if (currentPosition < _previousPostion && currentPosition > 0)
-            	return;
-            
-            int progress = getProgressPercentage(currentPosition, totalDuration);
-            
-            _playbackSeekBar.setProgress(progress);
-            Log.d(getLocalClassName(), "Progress: " + progress + " (" + currentPosition + "/" + totalDuration + ")");
-            
-            _previousPostion = currentPosition;
+			updateProgressUI();
 
             if (_mediaPlayer.isPlaying())
             	updateProgress();
 		}
 	};
+	
+	private void initMediaPlayer() {
+		_mediaPlayer = new MediaPlayer();
+    	_mediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
+    	_mediaPlayer.setOnErrorListener(this);
+    	_mediaPlayer.setOnCompletionListener(this);
+    	_mediaPlayer.setOnInfoListener(this);
+        _playbackSeekBar.setProgress(0);
+        _playbackSeekBar.setMax(100);
+	}
     
     private void beginPlayback(Uri uri) {
     	if (uri == null) {
@@ -114,20 +150,15 @@ public class MainActivity extends Activity
     	
     	Log.d(getLocalClassName(), "Begining playback of: " + uri.toString());
         
-        setFilename(uri);
-        togglePlayButton();
-        killMediaPlayer();
+        //togglePlayButton();
+        //killMediaPlayer();
         
+        
+        if (_mediaPlayer == null)
+        	initMediaPlayer();
+
         _previousPostion = 0;
-        _playbackSeekBar.setProgress(0);
-        _playbackSeekBar.setMax(100);
-        
-    	_mediaPlayer = new MediaPlayer();
-    	_mediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
-    	//_mediaPlayer.setOnPreparedListener(this);
-    	//_mediaPlayer.setOnErrorListener(this);
-    	_mediaPlayer.setOnCompletionListener(this);
-    	//_mediaPlayer.setOnInfoListener(this);
+		_mediaPlayer.reset();
         
 		try {
 			_mediaPlayer.setDataSource(getApplicationContext(), uri);
@@ -154,16 +185,83 @@ public class MainActivity extends Activity
 			return;
 		}
 
-		//_mediaPlayer.prepareAsync();
-		_mediaPlayer.start();
+        setFilename(uri);
+		resumePlayback();
+    }
+	
+	private void togglePlayButton() {
+        Button playButton = (Button) findViewById(R.id.play_button);
 		
-        updateProgress();
+        if (_state == PlayerState.Playing)
+        	playButton.setText(R.string.pause_button);
+        else
+        	playButton.setText(R.string.play_button);
+	}
+    
+    private void pausePlayback() {
+    	if (_state != PlayerState.Playing) return;
+    	
+    	_mediaPlayer.pause();    	
+    	_handler.removeCallbacks(_updateProgressTask);
+    	_state = PlayerState.Paused;
+    	
+    	togglePlayButton();
     }
     
-    public void playAudio(View view) {
-    	if (_mediaPlayer == null || !_mediaPlayer.isPlaying())
-    		beginPlayback(_currentUri);
+    private void resumePlayback() {
+    	if (_state == PlayerState.Playing) return;
+
+    	_mediaPlayer.start();
+    	_state = PlayerState.Playing;
+    	
+    	togglePlayButton();
+    	updateProgress();
     }
+    
+    private void stopPlayback() {
+    	if (_state == PlayerState.Stopped) return;
+    	
+    	_mediaPlayer.stop();
+    	_handler.removeCallbacks(_updateProgressTask);
+    	_state = PlayerState.Stopped;
+    	
+    	togglePlayButton();
+    }
+    
+    public void playClick(View view) {    	
+    	switch (_state) {
+    	case Paused:
+    		resumePlayback();
+    		break;
+    	case Playing:
+    		pausePlayback();
+    		break;
+    	default:
+    		beginPlayback(_currentUri);
+    		break;
+    	}
+    }
+    
+    public void exitApplication(View view) {
+    	stopPlayback();
+        killMediaPlayer();
+        finish();
+    }
+	
+	public void showFileSelection(View view) {
+		Intent fileExploreIntent = new Intent(
+			ua.com.vassiliev.androidfilebrowser.FileBrowserActivity.INTENT_ACTION_SELECT_FILE,
+			null,
+			this,
+			ua.com.vassiliev.androidfilebrowser.FileBrowserActivity.class
+		);
+
+		fileExploreIntent.putExtra(
+			ua.com.vassiliev.androidfilebrowser.FileBrowserActivity.startDirectoryParameter, 
+			Environment.getExternalStorageDirectory().getPath());
+		
+		startActivityForResult(fileExploreIntent, REQUEST_CODE_PICK_FILE);
+	}
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -175,9 +273,6 @@ public class MainActivity extends Activity
         
         _playbackSeekBar = (SeekBar) findViewById(R.id.playback_seekbar);
         
-        // Ensure volume keys effect app volume
-        //setVolumeControlStream(AudioManager.STREAM_MUSIC);
-        
         Intent intent = getIntent();
         Uri uri = intent.getData();
         
@@ -187,9 +282,10 @@ public class MainActivity extends Activity
         if (intent.getType() != null && intent.getType().indexOf("audio/") == -1)
         	return;
         
-        _currentUri = uri;
-        
-        //beginPlayback(uri);
+        if (uri != _currentUri) {
+        	_autoPlay = uri.getScheme().equals("file");
+        	_currentUri = uri;
+        }
     }
 
     @Override
@@ -203,8 +299,10 @@ public class MainActivity extends Activity
     	Log.d(getLocalClassName(), "Resumed");
         super.onResume();
         
-        if (_currentUri != null && _currentUri.getScheme().equals("file"))
+        if (_autoPlay) {
+        	_autoPlay = false;
         	beginPlayback(_currentUri);
+        }
     }
     
     @Override
@@ -212,10 +310,7 @@ public class MainActivity extends Activity
     	Log.d(getLocalClassName(), "Stopped");
         super.onStop();
         
-        if (_mediaPlayer != null)
-        	_mediaPlayer.pause();
-        
-        _handler.removeCallbacks(_updateProgressTask);
+        pausePlayback();
     }
     
     @Override
@@ -223,31 +318,17 @@ public class MainActivity extends Activity
     	Log.d(getLocalClassName(), "Destroyed");
         super.onDestroy();
         
+        stopPlayback();
         killMediaPlayer();
     }
-
-	@Override
-	public void onPrepared(MediaPlayer mediaPlayer) {
-		Log.d(getLocalClassName(), "Prepared");
-		
-		//AudioManager manager = (AudioManager) getApplicationContext().getSystemService(AUDIO_SERVICE);
-		
-		//int result = manager.requestAudioFocus(this, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK);
-		
-		//if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-			Log.d(getLocalClassName(), "Starting");
-			mediaPlayer.start();
-		//}
-	}
 
 	@Override
 	public boolean onError(MediaPlayer mediaPlayer, int what, int extra) {
 		Log.e(getLocalClassName(), "Error occurred: " + what + " (" + extra + ")");
 		
-		mediaPlayer.release();
-		mediaPlayer = null;
-		
-		showError("Problem loading file");
+		stopPlayback();
+        killMediaPlayer();
+		showError("Error occurred");
 		
 		return false;
 	}
@@ -255,11 +336,12 @@ public class MainActivity extends Activity
 	@Override
 	public void onCompletion(MediaPlayer mediaPlayer) {
 		Log.d(getLocalClassName(), "Completed");
-		togglePlayButton();
 		
 		// HACK: for some reason we don't reach 100% on some files automatically
 		mediaPlayer.seekTo(mediaPlayer.getDuration());
-		updateProgress();
+		updateProgressNow();
+		
+		stopPlayback();
 	}
 
 	@Override
@@ -267,26 +349,19 @@ public class MainActivity extends Activity
 		Log.w(getLocalClassName(), "Info occurred: " + what + " (" + extra + ")");
 		return false;
 	}
-
+	
 	@Override
-	public void onAudioFocusChange(int focusChange) {
-		Log.d(getLocalClassName(), "Audio Focus Changed: " + focusChange);
+	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+		Log.d(getLocalClassName(), "Activity result: " + requestCode + ", " + resultCode);
 		
-		AudioManager manager = (AudioManager) getApplicationContext().getSystemService(AUDIO_SERVICE);
-		
-		if (focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
-			if (_mediaPlayer != null)
-				_mediaPlayer.pause();
-        }
-		else if (focusChange == AudioManager.AUDIOFOCUS_GAIN) {
-            if (_mediaPlayer != null)
-            	_mediaPlayer.start();
-        }
-        else if (focusChange == AudioManager.AUDIOFOCUS_LOSS) {
-        	manager.abandonAudioFocus(this);
-        	
-        	if (_mediaPlayer != null)
-        		_mediaPlayer.stop();
+		if (requestCode == REQUEST_CODE_PICK_FILE) {
+        	if (resultCode == RESULT_OK) {
+        		String newFile = data.getStringExtra(
+        			ua.com.vassiliev.androidfilebrowser.FileBrowserActivity.returnFileParameter);
+        		
+        		_currentUri = Uri.fromFile(new File(newFile));
+        		beginPlayback(_currentUri);	        	
+        	}
         }
 	}
 }

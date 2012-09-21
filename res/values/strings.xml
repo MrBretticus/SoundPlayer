@@ -10,5 +10,6 @@
     <string name="hello_world">Hello world!</string>
     <string name="title_activity_player">Player</string>
     <string name="load_button">Load</string>
+    <string name="done_button">Done</string>
 
 </resources>
